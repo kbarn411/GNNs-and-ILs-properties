@@ -1,0 +1,17 @@
+TARGET_FEATURE_NAME : 'viscosity'
+CLEAN : False
+PREPARE_DATASET_FROM_SMI : True # True - use ions seperately, False - treat molecule as whole
+ENGINE : 'OB' # 'OB', 'RDKIT'
+CHARGE_ENGINE : 'OB' # 'OB', 'RDKIT'
+CHARGE_MODEL : 'gasteiger' # 'gasteiger', 'mmff94', 'qtpie'
+REMOVE_HS : True # True - do not include hydrogens in graphs, False - include them
+REMOVE_NUM_HS : False # True - do not include number of hydrogens in node properties, False - include them
+SPLITTER : 'random'
+ARCHITECTURE : 'one-net' # 'one-net' or 'two-net'
+TRANSFER : True # True - "transfer learning" from density, False - no
+FINE_TUNING : True # changes anything only if TRANSFER is set to True; True - fine-tune it is update all weights, False - transfer learning ie frozen feature extraction layers
+PREPARE_LINKING_IONIC_BOND : True
+FEATURE_TRANSFORM : True # transform y value into ln-version (logarithmic transformation)
+SEED : 42
+VERBOSE : False
+NUM_GRAPHS_PER_BATCH : 1024
