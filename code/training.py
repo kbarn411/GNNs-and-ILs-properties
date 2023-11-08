@@ -126,7 +126,10 @@ def perform_training_loop(device, params, data, cond_names, dataset, clean_datas
     if params['ARCHITECTURE'] == 'one-net':
         model = GCN(GCNConv, input_channels = data[0].x.shape[1], embedding_size = embedding_size, linear_size = linear_size, add_params_num = len(cond_names))
     elif params['ARCHITECTURE'] == 'two-net':
-        model = GCN2(GCNConv, input_channels = data[0][0].x.shape[1], embedding_size = embedding_size, linear_size = linear_size, add_params_num = len(cond_names))
+        if params['TWO_NET_VARIANT'] == 's':
+            model = GCN2(GCNConv, input_channels = data[0][0].x.shape[1], embedding_size = embedding_size, linear_size = linear_size, add_params_num = len(cond_names))
+        if params['TWO_NET_VARIANT'] == 'o':
+            model = GCN2o(GCNConv, input_channels = data[0][0].x.shape[1], embedding_size = embedding_size, linear_size = linear_size, add_params_num = len(cond_names))
     if params['TRANSFER'] == True:
         if str(device) == 'cpu':
             model.load_state_dict(torch.load('../models/base-model-density.pt', map_location=torch.device('cpu')))
@@ -188,10 +191,14 @@ def perform_training_loop(device, params, data, cond_names, dataset, clean_datas
     sum to {len(train_list)/(len(data))*100 + len(valid_list)/(len(data))*100 + len(test_list)/(len(data))*100:.2f}% of dataset
     and    {len(train_list)/(len_of_data_used)*100 + len(valid_list)/ (len_of_data_used)*100 + len(test_list)/(len_of_data_used)*100:.2f} % of sets
     ''')
-    train, evaluate = prepare_training_one_net(device, optimizer, model, loss_fn, loss_r2, loss_mae)
+    if params['ARCHITECTURE'] == 'one-net': 
+        train, evaluate = prepare_training_one_net(device, optimizer, model, loss_fn, loss_r2, loss_mae)
+    if params['ARCHITECTURE'] == 'two-net': 
+        train, evaluate = prepare_training_two_net(device, optimizer, model, loss_fn, loss_r2, loss_mae)
     losses, val_losses, coeffs, val_coeffs, maes, val_maes = perform_training(train, evaluate, loader, val_loader, scheduler)
     perform_validation(evaluate, loader, val_loader, test_loader)
     plot_losses(losses, val_losses, coeffs, val_coeffs)
+    print_results_of_final_eval(params, model, device, loader, val_loader, test_loader, test_on_original_data = True)
     return model
 
 def perform_testing(device, params, model):

@@ -247,8 +247,9 @@ def get_atom_features(params, mol, return_type="numpy"):
     if params['ENGINE'] == 'OB':
         mol_mol = Chem.MolToMolBlock(mol)
         bel_mol = pybel.readstring("mol", mol_mol)
-        ob_charge_model = openbabel.OBChargeModel.FindType(params['CHARGE_MODEL'])
-        ob_charge_model.ComputeCharges(bel_mol.OBMol)
+        if params['CHARGE_MODEL'] != 'formal':
+            ob_charge_model = openbabel.OBChargeModel.FindType(params['CHARGE_MODEL'])
+            ob_charge_model.ComputeCharges(bel_mol.OBMol)
     elif params['ENGINE'] == 'RDKIT':
         AllChem.ComputeGasteigerCharges(mol)
     else:
@@ -261,8 +262,8 @@ def get_atom_features(params, mol, return_type="numpy"):
         hybr.append(atom.GetHybridization())
 
         if params['ENGINE'] == 'OB':
-            charge = bel_mol.OBMol.GetAtom(i+1).GetPartialCharge()
-            # charge = bel_mol.OBMol.GetAtom(i+1).GetFormalCharge()
+            if params['CHARGE_MODEL'] != 'formal': charge = bel_mol.OBMol.GetAtom(i+1).GetPartialCharge()
+            else: charge = bel_mol.OBMol.GetAtom(i+1).GetFormalCharge()
         elif params['ENGINE'] == 'RDKIT':
             charge = atom.GetDoubleProp("_GasteigerCharge")
         else:
@@ -270,7 +271,7 @@ def get_atom_features(params, mol, return_type="numpy"):
 
         if math.isnan(charge):
             charge = 0
-        charges.append(charge)
+        if params['CHARGE_MODEL'] != '': charges.append(charge)
 
         aromacity.append(atom.GetIsAromatic())
         degrees.append(atom.GetDegree())
@@ -733,9 +734,9 @@ def prepare_training_one_net(device, optimizer, model, loss_fn, loss_r2, loss_ma
             optimizer.zero_grad()
             # Passing the node features and the connection info
             if model.crafted_add_params_num:
-                pred, embedding = model(batch.x.float(), batch.edge_index, batch.batch, batch.cond)
+                pred, embedding = model(batch.x.float(), batch.edge_index, batch.edge_weight, batch.batch, batch.cond)
             else:
-                pred, embedding = model(batch.x.float(), batch.edge_index, batch.batch)
+                pred, embedding = model(batch.x.float(), batch.edge_index, batch.edge_weight, batch.batch)
             loss = torch.sqrt(loss_fn(pred, batch.y))
             losses += loss
             r2s += loss_r2(pred, batch.y)
@@ -755,9 +756,9 @@ def prepare_training_one_net(device, optimizer, model, loss_fn, loss_r2, loss_ma
         for i, batch in enumerate(val_loader):
             batch.to(device)
             if model.crafted_add_params_num:
-                pred, _ = model(batch.x.float(), batch.edge_index, batch.batch, batch.cond)
+                pred, _ = model(batch.x.float(), batch.edge_index, batch.edge_weight, batch.batch, batch.cond)
             else:
-                pred, _ = model(batch.x.float(), batch.edge_index, batch.batch)
+                pred, _ = model(batch.x.float(), batch.edge_index, batch.edge_weight, batch.batch)
             loss = torch.sqrt(loss_fn(pred, batch.y))
             losses += loss
             r2s += loss_r2(pred, batch.y)
@@ -781,9 +782,9 @@ def prepare_training_two_net(device, optimizer, model, loss_fn, loss_r2, loss_ma
             optimizer.zero_grad()
             # Passing the node features and the connection info
             if model.crafted_add_params_num:
-                pred, embedding = model(batch[0].x.float(), batch[0].edge_index, batch[1].x.float(), batch[1].edge_index, batch[0].batch, batch[1].batch, batch[0].cond)
+                pred, embedding = model(batch[0].x.float(), batch[0].edge_index, batch[0].edge_weight, batch[1].x.float(), batch[1].edge_index, batch[1].edge_weight, batch[0].batch, batch[1].batch, batch[0].cond)
             else:
-                pred, embedding = model(batch[0].x.float(), batch[0].edge_index, batch[1].x.float(), batch[1].edge_index, batch[0].batch, batch[1].batch)
+                pred, embedding = model(batch[0].x.float(), batch[0].edge_index, batch[0].edge_weight, batch[1].x.float(), batch[1].edge_index, batch[1].edge_weight, batch[0].batch, batch[1].batch)
             loss = torch.sqrt(loss_fn(pred, batch[0].y))
             losses += loss
             r2s += loss_r2(pred, batch[0].y)
@@ -804,9 +805,9 @@ def prepare_training_two_net(device, optimizer, model, loss_fn, loss_r2, loss_ma
             batch[0].to(device)
             batch[1].to(device)
             if model.crafted_add_params_num:
-                pred, _ = model(batch[0].x.float(), batch[0].edge_index, batch[1].x.float(), batch[1].edge_index, batch[0].batch, batch[1].batch, batch[0].cond)
+                pred, _ = model(batch[0].x.float(), batch[0].edge_index, batch[0].edge_weight, batch[1].x.float(), batch[1].edge_index, batch[1].edge_weight, batch[0].batch, batch[1].batch, batch[0].cond)
             else:
-                pred, _ = model(batch[0].x.float(), batch[0].edge_index, batch[1].x.float(), batch[1].edge_index, batch[0].batch, batch[1].batch)
+                pred, _ = model(batch[0].x.float(), batch[0].edge_index, batch[0].edge_weight, batch[1].x.float(), batch[1].edge_index, batch[1].edge_weight, batch[0].batch, batch[1].batch)
             loss = torch.sqrt(loss_fn(pred, batch[0].y))
             losses += loss
             r2s += loss_r2(pred, batch[0].y)
@@ -881,3 +882,113 @@ def plot_losses(losses, val_losses, coeffs, val_coeffs):
     logging.info("Training complete")
     
     return None
+
+def final_eval(params, model, device, test_loader, y_dataset_max, y_dataset_min, test_on_original_data = True):
+    """
+    Evaluate the model on the test dataset and return the original test and predicted values.
+    
+    Parameters:
+    - params: A dictionary containing various parameters for the system.
+    - model: The trained model to be evaluated.
+    - device: The device on which the model is running.
+    - test_loader: The data loader for the test dataset.
+    - y_dataset_max: The maximum value in the target variable of the dataset (so normalization can be reversed).
+    - y_dataset_min: The minimum value in the target variable of the dataset (so normalization can be reversed).
+        test_on_original_data (bool, optional): Whether to evaluate the model on the original data (only important if log-scale was used). Defaults to True.
+    
+    Returns:
+    - original_y_test_np: A numpy array containing the original test values.
+    - original_y_pred_np: A numpy array containing the predicted values.
+    """
+    original_y_test = []
+    original_y_pred = []
+    for i, batch in enumerate(test_loader):
+        if params['ARCHITECTURE'] == 'one-net':
+            batch.to(device)
+            if model.crafted_add_params_num:
+                pred, _ = model(batch.x.float(), batch.edge_index, batch.edge_weight, batch.batch, batch.cond)
+            else:
+                pred, _ = model(batch.x.float(), batch.edge_index, batch.edge_weight, batch.batch)
+        if params['ARCHITECTURE'] == 'two-net':
+            batch[0].to(device)
+            batch[1].to(device)
+            if model.crafted_add_params_num:
+                pred, _ = model(batch[0].x.float(), batch[0].edge_index, batch[0].edge_weight, batch[1].x.float(), batch[1].edge_index, batch[1].edge_weight, batch[0].batch, batch[1].batch, batch[0].cond)
+            else:
+                pred, _ = model(batch[0].x.float(), batch[0].edge_index, batch[0].edge_weight, batch[1].x.float(), batch[1].edge_index, batch[1].edge_weight, batch[0].batch, batch[1].batch)
+
+        if test_on_original_data == True:
+            if params['FEATURE_TRANSFORM'] == True:
+                ypred_for_eval = torch.exp(pred * (y_dataset_max - y_dataset_min) + y_dataset_min)
+                if params['ARCHITECTURE'] == 'one-net': ytrue_for_eval = torch.exp(batch.y * (y_dataset_max - y_dataset_min) + y_dataset_min)
+                if params['ARCHITECTURE'] == 'two-net': ytrue_for_eval = torch.exp(batch[0].y * (y_dataset_max - y_dataset_min) + y_dataset_min)
+            else:
+                ypred_for_eval = pred * (y_dataset_max - y_dataset_min) + y_dataset_min
+                if params['ARCHITECTURE'] == 'one-net': ytrue_for_eval = batch.y * (y_dataset_max - y_dataset_min) + y_dataset_min
+                if params['ARCHITECTURE'] == 'two-net': ytrue_for_eval = batch[0].y * (y_dataset_max - y_dataset_min) + y_dataset_min
+        else:
+            ypred_for_eval = pred
+            if params['ARCHITECTURE'] == 'one-net': ytrue_for_eval = batch.y
+            if params['ARCHITECTURE'] == 'two-net': ytrue_for_eval = batch[0].y
+
+        original_y_pred.extend(ypred_for_eval.cpu().detach().numpy().tolist())
+        original_y_test.extend(ytrue_for_eval.float().cpu().detach().numpy().tolist())
+    original_y_test_np = np.array([item for sublist in original_y_test for item in sublist])
+    original_y_pred_np = np.array([item for sublist in original_y_pred for item in sublist])
+    return original_y_test_np, original_y_pred_np
+
+def print_results_of_final_eval(params, model, device, loader, val_loader, test_loader, test_on_original_data = True):
+    """
+    Evaluates the performance of a  model on a original values from dataset (without normalization) and prints the results.
+    
+    Args:
+        params (dict): A dictionary containing the parameters of the system.
+        model (object): The model to be evaluated.
+        device (str): The device on which the model is trained (e.g., cpu, cuda).
+        loader (object): The data loader for the training dataset.
+        val_loader (object): The data loader for the validation dataset.
+        test_loader (object): The data loader for the test dataset.
+        test_on_original_data (bool, optional): Whether to evaluate the model on the original data (only important if log-scale was used). Defaults to True.
+    
+    Returns:
+        None
+    """
+    train_orginal_losses, train_original_r2s, train_original_maes, train_original_mares, train_original_ases = [], [], [], [], []
+    val_original_losses, val_original_r2s, val_original_maes, val_original_mares, val_original_ases = [], [], [], [], []
+    test_original_losses, test_original_r2s, test_original_maes, test_original_mares, test_original_ases = [], [], [], [], []
+    evaluator = RegressionMetric()
+
+    for _ in range(10):
+        # train evaluation
+        original_y_label_train, original_y_pred_train = final_eval(params, model, device, loader, test_on_original_data=test_on_original_data)
+        train_orginal_losses.append(evaluator.root_mean_squared_error(original_y_label_train, original_y_pred_train))
+        train_original_r2s.append(evaluator.coefficient_of_determination(original_y_label_train, original_y_pred_train))
+        train_original_maes.append(evaluator.mean_absolute_error(original_y_label_train, original_y_pred_train))
+        train_original_mares.append(evaluator.mean_absolute_percentage_error(original_y_label_train, original_y_pred_train))
+        train_original_ases.append(evaluator.a20_index(original_y_label_train, original_y_pred_train))
+
+        # validation evaluation
+        original_y_label_valid, original_y_pred_valid = final_eval(params, model, device, val_loader, test_on_original_data=test_on_original_data)
+        val_original_losses.append(evaluator.root_mean_squared_error(original_y_label_valid, original_y_pred_valid))
+        val_original_r2s.append(evaluator.coefficient_of_determination(original_y_label_valid, original_y_pred_valid))
+        val_original_maes.append(evaluator.mean_absolute_error(original_y_label_valid, original_y_pred_valid))
+        val_original_mares.append(evaluator.mean_absolute_percentage_error(original_y_label_valid, original_y_pred_valid))
+        val_original_ases.append(evaluator.a20_index(original_y_label_valid, original_y_pred_valid))
+
+        # test evaluation
+        original_y_label_test, original_y_pred_test = final_eval(params, model, device, test_loader, test_on_original_data=test_on_original_data)
+        test_original_losses.append(evaluator.root_mean_squared_error(original_y_label_test, original_y_pred_test))
+        test_original_r2s.append(evaluator.coefficient_of_determination(original_y_label_test, original_y_pred_test))
+        test_original_maes.append(evaluator.mean_absolute_error(original_y_label_test, original_y_pred_test))
+        test_original_mares.append(evaluator.mean_absolute_percentage_error(original_y_label_test, original_y_pred_test))
+        test_original_ases.append(evaluator.a20_index(original_y_label_test, original_y_pred_test))
+
+    print(f"\nFinal evaluation {test_on_original_data = }")
+    print(f"Train loss {statistics.mean(train_orginal_losses):.3f} +/- {statistics.stdev(train_orginal_losses):.3f} | Train MAE {statistics.mean(train_original_maes):.3f} +/- {statistics.stdev(train_original_maes):.3f} | Train R2 {statistics.mean(train_original_r2s):.2f} +/- {statistics.stdev(train_original_r2s):.2f} | Train MARE {statistics.mean(train_original_mares):.3f} +/- {statistics.stdev(train_original_mares):.3f} | Train A20 {statistics.mean(train_original_ases):.2f} +/- {statistics.stdev(train_original_ases):.2f}")
+    print(f"Valid loss {statistics.mean(val_original_losses):.3f} +/- {statistics.stdev(val_original_losses):.3f} | Valid MAE {statistics.mean(val_original_maes):.3f} +/- {statistics.stdev(val_original_maes):.3f} | Valid R2 {statistics.mean(val_original_r2s):.2f} +/- {statistics.stdev(val_original_r2s):.2f} | Valid MARE {statistics.mean(val_original_mares):.3f} +/- {statistics.stdev(val_original_mares):.3f} | Valid A20 {statistics.mean(val_original_ases):.2f} +/- {statistics.stdev(val_original_ases):.2f}")
+    print(f"Test  loss {statistics.mean(test_original_losses):.3f} +/- {statistics.stdev(test_original_losses):.3f} | Test  MAE {statistics.mean(test_original_maes):.3f} +/- {statistics.stdev(test_original_maes):.3f} | Test  R2 {statistics.mean(test_original_r2s):.2f} +/- {statistics.stdev(test_original_r2s):.2f} | Test  MARE {statistics.mean(test_original_mares):.3f} +/- {statistics.stdev(test_original_mares):.3f} | Test  A20 {statistics.mean(test_original_ases):.2f} +/- {statistics.stdev(test_original_ases):.2f}")
+
+    figt = go.Figure(data=go.Scatter(x=original_y_label_test, y=original_y_pred_test, mode='markers'))
+    figt.update_layout(autosize=False, width=800, height=800,)
+    figt.add_shape(type="line", x0=min(original_y_label_test), y0=min(original_y_label_test), x1=max(original_y_label_test), y1=max(original_y_label_test))
+    figt.show()
