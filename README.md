@@ -4,7 +4,7 @@ This repo contains codes and data to reproduce our work on Graph Neural Networks
 
 Corresponding author: Karol Baran (GdańskTech), karol.baran[at]pg.edu.pl
 
-Manuscript status: submitted (2023)
+Manuscript status: accepted Journal of Physical Chemistry B - Machine Learning in Physical Chemistry Virtual Special Issue (2023) 
 
 ## Project description
 
