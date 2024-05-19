@@ -4,7 +4,7 @@ This repo contains codes and data to reproduce our work on Graph Neural Networks
 
 Corresponding author: Karol Baran (GdańskTech), karol.baran[at]pg.edu.pl
 
-Manuscript status: accepted Journal of Physical Chemistry B - Machine Learning in Physical Chemistry Virtual Special Issue (2023) 
+K. Baran and A. Kloskowski, Graph Neural Networks and Structural Information on Ionic Liquids: A Cheminformatics Study on Molecular Physicochemical Property Prediction, Journal of Physical Chemistry B - Machine Learning in Physical Chemistry Virtual Special Issue (2023), https://doi.org/10.1021/acs.jpcb.3c05521
 
 ## Project description
 
